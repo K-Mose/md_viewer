@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -42,6 +43,26 @@ class LoadedDocument {
   final DocumentRef ref;
   final String location;
   final DecodedText text;
+
+  RecentFile toRecent() => RecentFile(
+        name: name,
+        ref: ref,
+        location: location,
+        openedAt: DateTime.now(),
+      );
+}
+
+/// 새로 저장한 문서. 다음 저장부터는 [ref]에 덮어쓴다.
+class SavedDocument {
+  const SavedDocument({
+    required this.name,
+    required this.ref,
+    required this.location,
+  });
+
+  final String name;
+  final DocumentRef ref;
+  final String location;
 
   RecentFile toRecent() => RecentFile(
         name: name,
@@ -118,6 +139,96 @@ class DocumentService {
           throw const DocumentException(DocumentErrorKind.unknown);
         }
         return fromNativeMap(result, fallbackRef: ref, fallbackName: name);
+    }
+  }
+
+  /// "다른 이름으로 저장": 저장 위치와 파일명을 고르는 창을 띄우고 UTF-8로 저장한다. 취소하면 null.
+  ///
+  /// - Android: ACTION_CREATE_DOCUMENT + 영구 읽기/쓰기 권한
+  /// - iOS: UIDocumentPicker(내보내기) + bookmark
+  /// - 데스크톱: file_picker 저장 대화상자
+  Future<SavedDocument?> saveAs({
+    required String suggestedName,
+    required String text,
+  }) async {
+    final bytes = Uint8List.fromList(utf8.encode(text));
+
+    if (_usesNativePicker) {
+      final Map<String, dynamic>? result;
+      try {
+        result = await _channel.invokeMapMethod<String, dynamic>(
+          'createDocument',
+          {'name': suggestedName, 'bytes': bytes},
+        );
+      } on PlatformException catch (e) {
+        throw _fromPlatform(e);
+      }
+      if (result == null) return null;
+      final ref = result['ref'];
+      if (ref is! Map) throw const DocumentException(DocumentErrorKind.unknown);
+      final name = result['name'] as String? ?? suggestedName;
+      return SavedDocument(
+        name: name,
+        ref: DocumentRef.fromJson(Map<String, dynamic>.from(ref)),
+        location: result['location'] as String? ?? name,
+      );
+    }
+
+    final uri = await FilePicker.saveFile(
+      dialogTitle: '마크다운 저장',
+      fileName: suggestedName,
+      bytes: bytes,
+      mimeType: 'text/markdown',
+    );
+    if (uri == null) return null;
+    final path = uri.isScheme('file') ? uri.toFilePath() : uri.toString();
+    // 플랫폼 구현에 따라 bytes를 직접 쓰지 않을 수 있어 한 번 더 확실히 쓴다.
+    await _writePath(path, bytes);
+    return SavedDocument(
+      name: p.basename(path),
+      ref: DocumentRef(kind: DocumentRefKind.path, value: path),
+      location: path,
+    );
+  }
+
+  /// 이미 저장한 문서에 덮어쓴다. bookmark가 갱신되면 새 참조를 돌려준다.
+  Future<DocumentRef> write(DocumentRef ref, String text) async {
+    final bytes = Uint8List.fromList(utf8.encode(text));
+    switch (ref.kind) {
+      case DocumentRefKind.path:
+      case DocumentRefKind.copy:
+        await _writePath(ref.value, bytes);
+        return ref;
+      case DocumentRefKind.uri:
+      case DocumentRefKind.bookmark:
+        final Map<String, dynamic>? result;
+        try {
+          result = await _channel.invokeMapMethod<String, dynamic>(
+            'writeDocument',
+            {...ref.toJson(), 'bytes': bytes},
+          );
+        } on PlatformException catch (e) {
+          throw _fromPlatform(e);
+        }
+        final newRef = result?['ref'];
+        return newRef is Map
+            ? DocumentRef.fromJson(Map<String, dynamic>.from(newRef))
+            : ref;
+    }
+  }
+
+  Future<void> _writePath(String path, Uint8List bytes) async {
+    try {
+      await File(path).writeAsBytes(bytes, flush: true);
+    } on FileSystemException catch (e) {
+      final code = e.osError?.errorCode;
+      if (code == 13 || (Platform.isWindows && code == 5)) {
+        throw DocumentException(DocumentErrorKind.permissionDenied, e.message);
+      }
+      if (code == 2 || code == 3) {
+        throw DocumentException(DocumentErrorKind.notFound, e.message);
+      }
+      throw DocumentException(DocumentErrorKind.unknown, e.message);
     }
   }
 

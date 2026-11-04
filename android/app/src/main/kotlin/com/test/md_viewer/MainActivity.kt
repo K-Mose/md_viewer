@@ -18,6 +18,8 @@ import java.util.concurrent.Executors
 class MainActivity : FlutterActivity() {
     private var openedFileChannel: MethodChannel? = null
     private var pendingPick: MethodChannel.Result? = null
+    private var pendingCreate: MethodChannel.Result? = null
+    private var pendingCreateBytes: ByteArray? = null
     private var initialIntentHandled = false
 
     // content:// 읽기는 클라우드 제공자(드라이브 등)에서 느릴 수 있어 백그라운드에서 한다.
@@ -56,6 +58,27 @@ class MainActivity : FlutterActivity() {
                         result.error("invalid_argument", "uri가 없습니다", null)
                     } else {
                         runIo(result) { readPersistedDocument(uri) }
+                    }
+                }
+                "createDocument" -> {
+                    val name = call.argument<String>("name") ?: "새 문서.md"
+                    val bytes = call.argument<ByteArray>("bytes")
+                    if (bytes == null) {
+                        result.error("invalid_argument", "bytes가 없습니다", null)
+                    } else {
+                        createDocument(name, bytes, result)
+                    }
+                }
+                "writeDocument" -> {
+                    val uri = call.argument<String>("value")?.let(Uri::parse)
+                    val bytes = call.argument<ByteArray>("bytes")
+                    if (uri == null || bytes == null) {
+                        result.error("invalid_argument", "uri 또는 bytes가 없습니다", null)
+                    } else {
+                        runIo(result) {
+                            writeBytes(uri, bytes)
+                            null
+                        }
                     }
                 }
                 "releaseDocument" -> {
@@ -108,8 +131,71 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    // ───────────────────────── 새 파일로 저장 ─────────────────────────
+
+    private fun createDocument(name: String, bytes: ByteArray, result: MethodChannel.Result) {
+        if (pendingCreate != null) {
+            result.error("busy", "이미 저장 위치를 고르는 중입니다", null)
+            return
+        }
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/markdown"
+            putExtra(Intent.EXTRA_TITLE, name)
+        }
+        pendingCreate = result
+        pendingCreateBytes = bytes
+        try {
+            startActivityForResult(intent, REQUEST_CREATE)
+        } catch (e: Exception) {
+            pendingCreate = null
+            pendingCreateBytes = null
+            result.error("unavailable", e.message, null)
+        }
+    }
+
+    private fun onCreateDocumentResult(resultCode: Int, data: Intent?) {
+        val result = pendingCreate ?: return
+        val bytes = pendingCreateBytes
+        pendingCreate = null
+        pendingCreateBytes = null
+        val uri = data?.data
+        if (resultCode != Activity.RESULT_OK || uri == null || bytes == null) {
+            result.success(null)
+            return
+        }
+        runIo(result) {
+            // 다음 저장(덮어쓰기)과 최근 파일 다시 열기를 위해 읽기/쓰기 영구 권한을 받아 둔다.
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+            writeBytes(uri, bytes)
+            val savedName = displayName(uri)
+            mapOf(
+                "name" to savedName,
+                "ref" to mapOf("kind" to "uri", "value" to uri.toString()),
+                "location" to friendlyLocation(uri, savedName),
+            )
+        }
+    }
+
+    /** 내용을 통째로 바꿔 쓴다. "wt"(truncate)를 지원하지 않는 제공자는 "w"로 다시 시도. */
+    private fun writeBytes(uri: Uri, bytes: ByteArray) {
+        val stream = try {
+            contentResolver.openOutputStream(uri, "wt")
+        } catch (_: IllegalArgumentException) {
+            contentResolver.openOutputStream(uri, "w")
+        }
+        (stream ?: throw FileNotFoundException(uri.toString())).use { it.write(bytes) }
+    }
+
     @Deprecated("FlutterActivity는 ComponentActivity가 아니라 Activity Result API 대신 사용")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == REQUEST_CREATE) {
+            onCreateDocumentResult(resultCode, data)
+            return
+        }
         if (requestCode != REQUEST_PICK) {
             super.onActivityResult(requestCode, resultCode, data)
             return
@@ -280,6 +366,7 @@ class MainActivity : FlutterActivity() {
         private const val OPENED_FILE_CHANNEL = "md_viewer/opened_file"
         private const val DOCUMENTS_CHANNEL = "md_viewer/documents"
         private const val REQUEST_PICK = 4101
+        private const val REQUEST_CREATE = 4102
         private val ALLOWED_EXTENSIONS = setOf("md", "markdown", "txt")
     }
 }

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../services/document_service.dart';
+import '../services/draft_store.dart';
 import '../services/opened_file_service.dart';
 import '../services/recent_files.dart';
 import '../services/text_decoder.dart';
 import '../theme/app_theme.dart';
+import 'editor_screen.dart';
 import 'viewer_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -56,6 +58,34 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     if (document != null) await _showDocument(document);
+  }
+
+  /// 새 문서. 임시저장된 글이 있으면 이어서 쓸지 먼저 묻는다.
+  Future<void> _newDocument() async {
+    final draftStore = DraftStore();
+    final draft = await draftStore.load();
+    if (!mounted) return;
+
+    var initialText = '';
+    if (draft != null) {
+      final choice = await showDialog<_DraftChoice>(
+        context: context,
+        builder: (_) => _DraftDialog(savedAt: draft.savedAt),
+      );
+      if (choice == null || !mounted) return;
+      if (choice == _DraftChoice.resume) {
+        initialText = draft.text;
+      } else {
+        await draftStore.clear();
+        if (!mounted) return;
+      }
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => EditorScreen(initialText: initialText)),
+    );
+    // 에디터에서 저장한 파일이 최근 목록에 추가됐을 수 있다.
+    await _loadRecents();
   }
 
   Future<void> _openRecent(RecentFile file) async {
@@ -122,7 +152,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   const _Header(),
                   const SizedBox(height: 40),
-                  _ActionButtons(onOpenFile: _pickAndOpenFile),
+                  _ActionButtons(
+                    onOpenFile: _pickAndOpenFile,
+                    onNewDocument: _newDocument,
+                  ),
                   const SizedBox(height: 44),
                   const _RecentFilesLabel(),
                   const SizedBox(height: 12),
@@ -229,9 +262,10 @@ class _Header extends StatelessWidget {
 }
 
 class _ActionButtons extends StatelessWidget {
-  const _ActionButtons({required this.onOpenFile});
+  const _ActionButtons({required this.onOpenFile, required this.onNewDocument});
 
   final VoidCallback onOpenFile;
+  final VoidCallback onNewDocument;
 
   @override
   Widget build(BuildContext context) {
@@ -244,11 +278,41 @@ class _ActionButtons extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         OutlinedButton.icon(
-          onPressed: () {
-            // TODO: 에디터 모드 (추후)
-          },
+          onPressed: onNewDocument,
           icon: const Icon(Icons.edit_note_rounded, size: 22),
           label: const Text('새 문서'),
+        ),
+      ],
+    );
+  }
+}
+
+enum _DraftChoice { resume, fresh }
+
+class _DraftDialog extends StatelessWidget {
+  const _DraftDialog({required this.savedAt});
+
+  final DateTime savedAt;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('임시저장된 문서가 있어요'),
+      content: Text(
+        '임시저장: ${formatRelativeTime(savedAt)}\n'
+        '이어서 쓸까요? '
+        '새로 쓰면 임시저장된 글은 지워져요.',
+        style: const TextStyle(color: AppColors.textSecondary, height: 1.5),
+      ),
+      // 앱 테마의 FilledButton은 가로로 꽉 차서(Size.fromHeight) 대화상자에는 TextButton을 쓴다.
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(_DraftChoice.fresh),
+          child: const Text('새로 쓰기'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(_DraftChoice.resume),
+          child: const Text('이어서 쓰기', style: TextStyle(fontWeight: .w700)),
         ),
       ],
     );

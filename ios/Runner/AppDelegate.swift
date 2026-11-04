@@ -26,6 +26,9 @@ final class DocumentsBridge: NSObject, UIDocumentPickerDelegate {
 
   private var openedFileChannel: FlutterMethodChannel?
   private var pendingPick: FlutterResult?
+  /// 새 파일 저장(내보내기) 대기: 결과 콜백과 정리할 임시 폴더
+  private var pendingExport: (FlutterResult, URL)?
+  private weak var exportPicker: UIDocumentPickerViewController?
   /// Dart가 getInitialFile을 호출하기 전에 도착한 파일 (콜드 스타트)
   private var pendingFiles: [[String: Any]] = []
   private var dartListening = false
@@ -48,6 +51,22 @@ final class DocumentsBridge: NSObject, UIDocumentPickerDelegate {
           return
         }
         self.runIo(result) { try self.readBookmark(data) }
+      case "createDocument":
+        guard let name = args?["name"] as? String,
+          let bytes = args?["bytes"] as? FlutterStandardTypedData
+        else {
+          result(FlutterError(code: "invalid_argument", message: "name/bytes가 없습니다", details: nil))
+          return
+        }
+        self.createDocument(name: name, data: bytes.data, result: result)
+      case "writeDocument":
+        guard let value = args?["value"] as? String, let bookmark = Data(base64Encoded: value),
+          let bytes = args?["bytes"] as? FlutterStandardTypedData
+        else {
+          result(FlutterError(code: "invalid_argument", message: "bookmark/bytes가 없습니다", details: nil))
+          return
+        }
+        self.runIo(result) { try self.writeBookmark(bookmark, data: bytes.data) }
       case "releaseDocument":
         result(nil)  // iOS 북마크는 따로 해제할 권한이 없다.
       default:
@@ -120,7 +139,111 @@ final class DocumentsBridge: NSObject, UIDocumentPickerDelegate {
     presenter.present(picker, animated: true)
   }
 
+  // MARK: - 새 파일로 저장
+
+  /// 임시 폴더에 파일을 만든 뒤 내보내기 선택기로 사용자가 고른 위치로 옮긴다.
+  private func createDocument(name: String, data: Data, result: @escaping FlutterResult) {
+    guard pendingExport == nil else {
+      result(FlutterError(code: "busy", message: "이미 저장 위치를 고르는 중입니다", details: nil))
+      return
+    }
+    guard let presenter = Self.topViewController() else {
+      result(FlutterError(code: "unavailable", message: "화면을 찾을 수 없습니다", details: nil))
+      return
+    }
+
+    let tempDir = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let tempURL = tempDir.appendingPathComponent(name)
+    do {
+      try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+      try data.write(to: tempURL)
+    } catch {
+      result(BridgeError.from(error).flutterError)
+      return
+    }
+
+    let picker: UIDocumentPickerViewController
+    if #available(iOS 14.0, *) {
+      // asCopy: false → 임시 파일을 고른 위치로 옮기고, 그 위치의 URL을 돌려받는다.
+      picker = UIDocumentPickerViewController(forExporting: [tempURL], asCopy: false)
+    } else {
+      picker = UIDocumentPickerViewController(url: tempURL, in: .moveToService)
+    }
+    picker.delegate = self
+    pendingExport = (result, tempDir)
+    exportPicker = picker
+    presenter.present(picker, animated: true)
+  }
+
+  private func finishExport(urls: [URL]?) {
+    guard let pending = pendingExport else { return }
+    let (result, tempDir) = pending
+    pendingExport = nil
+    exportPicker = nil
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    guard let url = urls?.first else {
+      result(nil)
+      return
+    }
+    do {
+      let accessing = url.startAccessingSecurityScopedResource()
+      defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+      let bookmark = try url.bookmarkData(
+        options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+      result([
+        "name": url.lastPathComponent,
+        "ref": ["kind": "bookmark", "value": bookmark.base64EncodedString()],
+        "location": Self.friendlyLocation(url.path),
+      ])
+    } catch {
+      result(BridgeError.from(error).flutterError)
+    }
+  }
+
+  /// 북마크가 가리키는 파일에 덮어쓴다. 북마크가 갱신되면 새 ref를 돌려준다.
+  private func writeBookmark(_ bookmark: Data, data: Data) throws -> [String: Any]? {
+    var stale = false
+    let url: URL
+    do {
+      url = try URL(
+        resolvingBookmarkData: bookmark, options: [], relativeTo: nil,
+        bookmarkDataIsStale: &stale)
+    } catch {
+      throw BridgeError.notFound
+    }
+
+    let accessing = url.startAccessingSecurityScopedResource()
+    defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
+    if url.path.contains("/.Trash/") || !FileManager.default.fileExists(atPath: url.path) {
+      throw BridgeError.notFound
+    }
+
+    var coordinatorError: NSError?
+    var writeError: Error?
+    NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing, error: &coordinatorError) {
+      writeURL in
+      do {
+        try data.write(to: writeURL)
+      } catch {
+        writeError = error
+      }
+    }
+    if let error = coordinatorError ?? writeError { throw BridgeError.from(error) }
+
+    guard stale,
+      let fresh = try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+    else { return nil }
+    return ["ref": ["kind": "bookmark", "value": fresh.base64EncodedString()]]
+  }
+
   func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+    if controller === exportPicker {
+      finishExport(urls: urls)
+      return
+    }
     guard let result = pendingPick else { return }
     pendingPick = nil
     guard let url = urls.first else {
@@ -131,6 +254,10 @@ final class DocumentsBridge: NSObject, UIDocumentPickerDelegate {
   }
 
   func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+    if controller === exportPicker {
+      finishExport(urls: nil)
+      return
+    }
     pendingPick?(nil)
     pendingPick = nil
   }
