@@ -1,17 +1,37 @@
-# md_viewer
+# MD Viewer
 
-A new Flutter project.
+휴대폰에서 마크다운(`.md`) 파일을 간편하게 열어 읽을 수 있는 뷰어 앱입니다.
+Flutter로 만들었습니다.
 
-## Getting Started
+## 주요 기능
 
-This project is a starting point for a Flutter application.
+- **파일 열기**: 앱 안에서 `.md`, `.markdown`, `.txt` 파일을 골라 바로 읽을 수 있습니다.
+- **다른 앱에서 바로 열기**: 파일 관리자나 메신저에서 마크다운 파일을 누르면 "연결 프로그램" 목록에 MD Viewer가 나타납니다.
+- **최근 파일**: 최근에 연 파일을 최대 10개까지 기억해서 다시 열기 쉽습니다. 없어진 파일은 목록에서 자동으로 정리됩니다.
+- **링크 열기**: 문서 안의 링크를 누르면 브라우저로 열립니다.
+- **다크 테마**: 눈이 편한 모노크롬 다크 테마를 씁니다.
 
-A few resources to get you started if this is your first Flutter project:
+## 지원 플랫폼
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+| 플랫폼 | 상태 |
+|---|---|
+| Android | 지원 |
+| iOS | 지원 |
+| Windows | 준비 중 |
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## 프로젝트 구조
+
+```
+lib/
+├── main.dart                       # 앱 진입점, 테마 설정
+├── screens/
+│   ├── home_screen.dart            # 홈 화면: 파일 열기, 최근 파일 목록
+│   └── viewer_screen.dart          # 마크다운 뷰어 화면
+├── services/
+│   ├── opened_file_service.dart    # 다른 앱에서 연 파일을 받아오는 기능
+│   └── recent_files.dart           # 최근 파일 목록 저장/불러오기
+└── theme/
+    └── app_theme.dart              # 색상, 버튼 등 테마 정의
+
+android/.../MainActivity.kt         # Android에서 다른 앱이 넘긴 파일을 읽어 전달
+```
