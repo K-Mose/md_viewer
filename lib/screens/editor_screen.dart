@@ -7,6 +7,7 @@ import '../services/document_service.dart';
 import '../services/draft_store.dart';
 import '../services/recent_files.dart';
 import '../theme/app_theme.dart';
+import '../theme/thin_scrollbar.dart';
 import 'viewer_screen.dart';
 
 /// 첫 번째 줄(제목)로 저장 파일명을 제안한다. 없으면 '새 문서.md'.
@@ -209,7 +210,7 @@ class _EditorScreenState extends State<EditorScreen> {
         ),
         body: SafeArea(
           top: false,
-          child: _EditorField(controller: _controller),
+          child: ThinScrollbars(child: _EditorField(controller: _controller)),
         ),
       ),
     );

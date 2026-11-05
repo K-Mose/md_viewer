@@ -14,6 +14,9 @@ abstract final class AppColors {
   // 모노크롬 컨셉: 주요 액션은 화이트 버튼(블랙 텍스트)으로 대비를 줌
   static const accent = Color(0xFFF2F2F3);
   static const onAccent = Color(0xFF111113);
+
+  // 얇은 스크롤바 (뷰어·에디터)
+  static const scrollbar = Color(0xFFEFEFEF);
 }
 
 abstract final class AppTheme {
