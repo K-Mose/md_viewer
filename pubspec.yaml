@@ -35,6 +35,7 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   markdown_widget: ^2.3.2+8
+  scroll_to_index: ^3.0.1
   file_picker: ^12.0.0-beta.7
   shared_preferences: ^2.5.5
   path: ^1.9.1

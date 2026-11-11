@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/document_service.dart';
 import '../services/draft_store.dart';
 import '../services/opened_file_service.dart';
+import '../services/reading_position_store.dart';
 import '../services/recent_files.dart';
 import '../services/text_decoder.dart';
 import '../theme/app_theme.dart';
@@ -18,6 +19,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final _store = RecentFilesStore();
+  final _positions = ReadingPositionStore();
   final _documents = DocumentService.instance;
   List<RecentFile> _recentFiles = [];
 
@@ -101,10 +103,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// 최근 목록에 기록하고 뷰어로 이동한다. 앱 안에서 연 파일과 외부 앱에서 연 파일 모두 여기로 온다.
   Future<void> _showDocument(LoadedDocument document) async {
-    final update = await _store.add(document.toRecent());
+    final recent = document.toRecent();
+    final update = await _store.add(recent);
     for (final evicted in update.evicted) {
       _documents.release(evicted.ref);
+      await _positions.remove(evicted.key);
     }
+    // 마지막으로 읽던 위치. 파일 내용이 바뀌었으면 null이라 맨 위부터 읽는다.
+    final position = await _positions.load(
+      recent.key,
+      length: document.text.text.length,
+    );
     if (!mounted) return;
     setState(() => _recentFiles = update.files);
 
@@ -113,8 +122,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) =>
-            ViewerScreen(title: document.name, content: document.text.text),
+        builder: (_) => ViewerScreen(
+          title: document.name,
+          content: document.text.text,
+          positionKey: recent.key,
+          initialPosition: position,
+        ),
       ),
     );
   }
@@ -132,6 +145,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     final updated = await _store.remove(file);
     _documents.release(file.ref);
+    await _positions.remove(file.key);
     if (mounted) setState(() => _recentFiles = updated);
   }
 
