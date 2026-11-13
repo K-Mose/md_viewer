@@ -31,7 +31,13 @@
                 <data android:mimeType="text/markdown"/>
                 <data android:mimeType="text/x-markdown"/>
             </intent-filter>
-            <!-- 파일 관리자가 .md를 text/plain, octet-stream 등으로 보내는 경우:
+            <!-- .txt 열기 (text/plain) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
+            <!-- 파일 관리자가 .md/.txt를 text/plain, octet-stream 등으로 보내는 경우:
                  확장자 기준 매칭 (pathPattern은 첫 매칭 지점 이후를 못 보는 한계가
                  있어 경로 깊이별 패턴을 함께 등록) -->
             <intent-filter>
@@ -45,6 +51,9 @@
                 <data android:pathPattern=".*\\..*\\.md"/>
                 <data android:pathPattern=".*\\..*\\..*\\.md"/>
                 <data android:pathPattern=".*\\.markdown"/>
+                <data android:pathPattern=".*\\.txt"/>
+                <data android:pathPattern=".*\\..*\\.txt"/>
+                <data android:pathPattern=".*\\..*\\..*\\.txt"/>
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.

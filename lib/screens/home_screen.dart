@@ -127,6 +127,8 @@ class _HomeScreenState extends State<HomeScreen> {
           content: document.text.text,
           positionKey: recent.key,
           initialPosition: position,
+          // .txt는 마크다운으로 해석하지 않고 원문 그대로 보여준다.
+          plainText: document.name.toLowerCase().endsWith('.txt'),
         ),
       ),
     );

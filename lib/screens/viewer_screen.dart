@@ -17,6 +17,7 @@ class ViewerScreen extends StatefulWidget {
     required this.content,
     this.positionKey,
     this.initialPosition,
+    this.plainText = false,
   });
 
   final String title;
@@ -27,6 +28,9 @@ class ViewerScreen extends StatefulWidget {
 
   /// 처음 열 때 이동할 위치. null이면 맨 위에서 시작한다.
   final ReadingPosition? initialPosition;
+
+  /// true면 마크다운으로 해석하지 않고 원문 그대로 보여준다 (.txt).
+  final bool plainText;
 
   static const _padding = EdgeInsets.fromLTRB(20, 8, 20, 40);
 
@@ -74,6 +78,13 @@ class _ViewerScreenState extends State<ViewerScreen>
   final _markdownKey = GlobalKey<MarkdownWidgetState>();
   final _positions = ReadingPositionStore();
 
+  /// 원문(.txt) 보기의 스크롤 컨트롤러. 마크다운 보기는 MarkdownWidget이 자기 것을 가진다.
+  final _plainController = AutoScrollController();
+
+  AutoScrollController? get _scrollController => widget.plainText
+      ? _plainController
+      : _markdownKey.currentState?.controller;
+
   /// 복원 이동이 끝날 때까지 본문을 투명하게 둬서, 맨 위가 잠깐 보였다 점프하는 모습을 막는다.
   /// (레이아웃은 그대로 일어나므로 이동에는 영향이 없다.)
   late bool _restoring = widget.initialPosition != null;
@@ -91,6 +102,7 @@ class _ViewerScreenState extends State<ViewerScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _plainController.dispose();
     super.dispose();
   }
 
@@ -102,7 +114,7 @@ class _ViewerScreenState extends State<ViewerScreen>
 
   Future<void> _restore(ReadingPosition position) async {
     try {
-      final controller = _markdownKey.currentState?.controller;
+      final controller = _scrollController;
       if (controller == null) return;
       await controller
           .scrollToIndex(
@@ -137,7 +149,7 @@ class _ViewerScreenState extends State<ViewerScreen>
 
   /// 화면 맨 위에 걸친 블록과 그 블록 안에서의 거리.
   ReadingPosition? _currentPosition() {
-    final controller = _markdownKey.currentState?.controller;
+    final controller = _scrollController;
     if (controller == null || !controller.hasClients) return null;
     final scrollOffset = controller.offset;
 
@@ -203,14 +215,85 @@ class _ViewerScreenState extends State<ViewerScreen>
             },
             child: Opacity(
               opacity: _restoring ? 0 : 1,
-              child: MarkdownWidget(
-                key: _markdownKey,
-                data: widget.content,
-                padding: ViewerScreen._padding,
-                config: ViewerScreen._config,
-              ),
+              child: widget.plainText
+                  ? _PlainTextView(
+                      content: widget.content,
+                      controller: _plainController,
+                    )
+                  : MarkdownWidget(
+                      key: _markdownKey,
+                      data: widget.content,
+                      padding: ViewerScreen._padding,
+                      config: ViewerScreen._config,
+                    ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// .txt 원문 보기. 마크다운으로 해석하지 않고 줄바꿈과 공백을 그대로 보여준다.
+///
+/// 긴 파일도 가볍게 그리려고 [_linesPerChunk]줄씩 묶어 ListView 항목으로 만들고,
+/// 항목마다 AutoScrollTag를 붙여 읽던 위치 저장/복원이 마크다운 보기와 같은 방식으로 동작한다.
+class _PlainTextView extends StatefulWidget {
+  const _PlainTextView({required this.content, required this.controller});
+
+  final String content;
+  final AutoScrollController controller;
+
+  @override
+  State<_PlainTextView> createState() => _PlainTextViewState();
+}
+
+class _PlainTextViewState extends State<_PlainTextView> {
+  static const _linesPerChunk = 40;
+
+  late List<String> _chunks = _split(widget.content);
+
+  @override
+  void didUpdateWidget(covariant _PlainTextView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.content != widget.content) {
+      _chunks = _split(widget.content);
+    }
+  }
+
+  static List<String> _split(String content) {
+    final lines =
+        content.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n');
+    final chunks = <String>[];
+    for (var start = 0; start < lines.length; start += _linesPerChunk) {
+      final end = start + _linesPerChunk;
+      chunks.add(
+        lines.sublist(start, end < lines.length ? end : lines.length).join('\n'),
+      );
+    }
+    return chunks;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final style = TextStyle(
+      color: Theme.of(context).colorScheme.onSurface,
+      fontSize: 14,
+      height: 1.6,
+      fontFamily: 'monospace',
+      // Windows, iOS/macOS에는 'monospace'가 없어서 대신 쓸 고정폭 글꼴
+      fontFamilyFallback: const ['Consolas', 'Menlo', 'Courier New'],
+    );
+    return SelectionArea(
+      child: ListView.builder(
+        controller: widget.controller,
+        padding: ViewerScreen._padding,
+        itemCount: _chunks.length,
+        itemBuilder: (context, index) => AutoScrollTag(
+          key: ValueKey(index),
+          controller: widget.controller,
+          index: index,
+          child: Text(_chunks[index], style: style),
         ),
       ),
     );
