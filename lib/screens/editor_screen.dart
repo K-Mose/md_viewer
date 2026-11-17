@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../services/app_settings.dart';
 import '../services/document_service.dart';
 import '../services/draft_store.dart';
 import '../services/recent_files.dart';
@@ -83,7 +84,10 @@ class _EditorScreenState extends State<EditorScreen> {
     if (dirty != _dirty) setState(() => _dirty = dirty);
 
     _autosaveTimer?.cancel();
-    _autosaveTimer = Timer(_autosaveDelay, _autosave);
+    // 설정에서 자동 임시저장을 끄면 나갈 때 "임시저장"을 직접 고른 경우에만 저장한다.
+    if (AppSettings.instance.autoDraft) {
+      _autosaveTimer = Timer(_autosaveDelay, _autosave);
+    }
   }
 
   Future<void> _autosave() async {

@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
+import 'app_settings.dart';
 import 'recent_files.dart';
 import 'text_decoder.dart';
 
@@ -120,7 +121,7 @@ class DocumentService {
           name: name ?? p.basename(ref.value),
           ref: ref,
           location: ref.value,
-          text: decodeText(bytes),
+          text: decodeText(bytes, preference: AppSettings.instance.encoding),
         );
       case DocumentRefKind.uri:
       case DocumentRefKind.bookmark:
@@ -270,7 +271,7 @@ class DocumentService {
       name: name,
       ref: ref,
       location: map['location'] as String? ?? name,
-      text: decodeText(bytes),
+      text: decodeText(bytes, preference: AppSettings.instance.encoding),
     );
   }
 

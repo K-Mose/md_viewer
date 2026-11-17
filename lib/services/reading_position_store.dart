@@ -76,6 +76,15 @@ class ReadingPositionStore {
     if (all.remove(documentKey) != null) await _saveAll(all);
   }
 
+  /// 저장된 문서 수.
+  Future<int> count() async => (await _loadAll()).length;
+
+  /// 모든 문서의 읽던 위치를 지운다.
+  Future<void> clearAll() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_key);
+  }
+
   Future<Map<String, dynamic>> _loadAll() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_key);

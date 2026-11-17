@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 
 import 'screens/home_screen.dart';
+import 'services/app_settings.dart';
 import 'theme/app_theme.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await AppSettings.instance.load();
   runApp(const MdViewerApp());
 }
 

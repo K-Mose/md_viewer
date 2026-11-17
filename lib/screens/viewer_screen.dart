@@ -6,8 +6,10 @@ import 'package:markdown_widget/markdown_widget.dart';
 import 'package:scroll_to_index/scroll_to_index.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../services/app_settings.dart';
 import '../services/reading_position_store.dart';
 import '../theme/app_theme.dart';
+import '../theme/text_scale_scope.dart';
 import '../theme/thin_scrollbar.dart';
 
 class ViewerScreen extends StatefulWidget {
@@ -34,34 +36,39 @@ class ViewerScreen extends StatefulWidget {
 
   static const _padding = EdgeInsets.fromLTRB(20, 8, 20, 40);
 
-  static final _config = MarkdownConfig.darkConfig.copy(
-    configs: [
-      LinkConfig(
-        style: const TextStyle(
-          color: Color(0xFF8AB4F8),
-          decoration: TextDecoration.underline,
-          decorationColor: Color(0xFF8AB4F8),
+  /// 마크다운 렌더링 설정. [lineHeight]가 null이면 문단 줄 높이는 라이브러리 기본값을 쓴다.
+  static MarkdownConfig _buildConfig(double? lineHeight) {
+    return MarkdownConfig.darkConfig.copy(
+      configs: [
+        if (lineHeight != null)
+          PConfig(textStyle: TextStyle(fontSize: 16, height: lineHeight)),
+        LinkConfig(
+          style: const TextStyle(
+            color: Color(0xFF8AB4F8),
+            decoration: TextDecoration.underline,
+            decorationColor: Color(0xFF8AB4F8),
+          ),
+          onTap: (url) {
+            final uri = Uri.tryParse(url);
+            if (uri != null) {
+              launchUrl(uri, mode: LaunchMode.externalApplication);
+            }
+          },
         ),
-        onTap: (url) {
-          final uri = Uri.tryParse(url);
-          if (uri != null) {
-            launchUrl(uri, mode: LaunchMode.externalApplication);
-          }
-        },
-      ),
-      TableConfig(
-        // 칸 폭 = 그 칸에서 가장 긴 내용의 폭 (화면에 맞춰 좁아지지 않음)
-        defaultColumnWidth: const IntrinsicColumnWidth(),
-        // 화면보다 넓은 표는 표만 좌우로 스크롤
-        wrapper: (table) => SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: table,
+        TableConfig(
+          // 칸 폭 = 그 칸에서 가장 긴 내용의 폭 (화면에 맞춰 좁아지지 않음)
+          defaultColumnWidth: const IntrinsicColumnWidth(),
+          // 화면보다 넓은 표는 표만 좌우로 스크롤
+          wrapper: (table) => SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: table,
+          ),
+          border: TableBorder.all(color: AppColors.border),
+          headerRowDecoration: const BoxDecoration(color: AppColors.surfaceHigh),
         ),
-        border: TableBorder.all(color: AppColors.border),
-        headerRowDecoration: const BoxDecoration(color: AppColors.surfaceHigh),
-      ),
-    ],
-  );
+      ],
+    );
+  }
 
   @override
   State<ViewerScreen> createState() => _ViewerScreenState();
@@ -77,6 +84,12 @@ class _ViewerScreenState extends State<ViewerScreen>
     with WidgetsBindingObserver {
   final _markdownKey = GlobalKey<MarkdownWidgetState>();
   final _positions = ReadingPositionStore();
+
+  /// 이 화면을 열 때의 설정. 설정 화면은 홈에서만 열 수 있어서 보는 동안은 바뀌지 않는다.
+  final _settings = AppSettings.instance;
+  late final _config = ViewerScreen._buildConfig(
+    _settings.lineSpacing.markdownHeight,
+  );
 
   /// 원문(.txt) 보기의 스크롤 컨트롤러. 마크다운 보기는 MarkdownWidget이 자기 것을 가진다.
   final _plainController = AutoScrollController();
@@ -207,25 +220,30 @@ class _ViewerScreenState extends State<ViewerScreen>
           ),
         ),
         body: ThinScrollbars(
-          child: NotificationListener<ScrollEndNotification>(
-            onNotification: (notification) {
-              // 본문 세로 스크롤만 (표 가로 스크롤은 depth가 다르다)
-              if (notification.depth == 0) _savePosition();
-              return false;
-            },
-            child: Opacity(
-              opacity: _restoring ? 0 : 1,
-              child: widget.plainText
-                  ? _PlainTextView(
-                      content: widget.content,
-                      controller: _plainController,
-                    )
-                  : MarkdownWidget(
-                      key: _markdownKey,
-                      data: widget.content,
-                      padding: ViewerScreen._padding,
-                      config: ViewerScreen._config,
-                    ),
+          // 설정의 글자 크기
+          child: TextScaleScope(
+            scale: _settings.textScale,
+            child: NotificationListener<ScrollEndNotification>(
+              onNotification: (notification) {
+                // 본문 세로 스크롤만 (표 가로 스크롤은 depth가 다르다)
+                if (notification.depth == 0) _savePosition();
+                return false;
+              },
+              child: Opacity(
+                opacity: _restoring ? 0 : 1,
+                child: widget.plainText
+                    ? _PlainTextView(
+                        content: widget.content,
+                        controller: _plainController,
+                        lineHeight: _settings.lineSpacing.plainHeight,
+                      )
+                    : MarkdownWidget(
+                        key: _markdownKey,
+                        data: widget.content,
+                        padding: ViewerScreen._padding,
+                        config: _config,
+                      ),
+              ),
             ),
           ),
         ),
@@ -239,10 +257,15 @@ class _ViewerScreenState extends State<ViewerScreen>
 /// 긴 파일도 가볍게 그리려고 [_linesPerChunk]줄씩 묶어 ListView 항목으로 만들고,
 /// 항목마다 AutoScrollTag를 붙여 읽던 위치 저장/복원이 마크다운 보기와 같은 방식으로 동작한다.
 class _PlainTextView extends StatefulWidget {
-  const _PlainTextView({required this.content, required this.controller});
+  const _PlainTextView({
+    required this.content,
+    required this.controller,
+    required this.lineHeight,
+  });
 
   final String content;
   final AutoScrollController controller;
+  final double lineHeight;
 
   @override
   State<_PlainTextView> createState() => _PlainTextViewState();
@@ -279,7 +302,7 @@ class _PlainTextViewState extends State<_PlainTextView> {
     final style = TextStyle(
       color: Theme.of(context).colorScheme.onSurface,
       fontSize: 14,
-      height: 1.6,
+      height: widget.lineHeight,
       fontFamily: 'monospace',
       // Windows, iOS/macOS에는 'monospace'가 없어서 대신 쓸 고정폭 글꼴
       fontFamilyFallback: const ['Consolas', 'Menlo', 'Courier New'],

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/app_settings.dart';
 import '../services/document_service.dart';
 import '../services/draft_store.dart';
 import '../services/opened_file_service.dart';
@@ -8,6 +9,7 @@ import '../services/recent_files.dart';
 import '../services/text_decoder.dart';
 import '../theme/app_theme.dart';
 import 'editor_screen.dart';
+import 'settings_screen.dart';
 import 'viewer_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -90,6 +92,14 @@ class _HomeScreenState extends State<HomeScreen> {
     await _loadRecents();
   }
 
+  Future<void> _openSettings() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+    );
+    // 설정에서 최근 파일을 지웠을 수 있다.
+    await _loadRecents();
+  }
+
   Future<void> _openRecent(RecentFile file) async {
     final LoadedDocument document;
     try {
@@ -109,11 +119,15 @@ class _HomeScreenState extends State<HomeScreen> {
       _documents.release(evicted.ref);
       await _positions.remove(evicted.key);
     }
+    final settings = AppSettings.instance;
     // 마지막으로 읽던 위치. 파일 내용이 바뀌었으면 null이라 맨 위부터 읽는다.
-    final position = await _positions.load(
-      recent.key,
-      length: document.text.text.length,
-    );
+    // 설정에서 기억을 끄면 불러오지도, 저장하지도 않는다.
+    final position = settings.rememberPosition
+        ? await _positions.load(
+            recent.key,
+            length: document.text.text.length,
+          )
+        : null;
     if (!mounted) return;
     setState(() => _recentFiles = update.files);
 
@@ -125,10 +139,11 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (_) => ViewerScreen(
           title: document.name,
           content: document.text.text,
-          positionKey: recent.key,
+          positionKey: settings.rememberPosition ? recent.key : null,
           initialPosition: position,
-          // .txt는 마크다운으로 해석하지 않고 원문 그대로 보여준다.
-          plainText: document.name.toLowerCase().endsWith('.txt'),
+          // .txt는 설정에 따라 원문 그대로(기본) 또는 마크다운으로 보여준다.
+          plainText: document.name.toLowerCase().endsWith('.txt') &&
+              settings.txtViewMode == TxtViewMode.raw,
         ),
       ),
     );
@@ -166,7 +181,7 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.fromLTRB(24, 32, 24, 0),
               sliver: SliverList.list(
                 children: [
-                  const _Header(),
+                  _Header(onOpenSettings: _openSettings),
                   const SizedBox(height: 40),
                   _ActionButtons(
                     onOpenFile: _pickAndOpenFile,
@@ -223,7 +238,9 @@ String formatRelativeTime(DateTime time) {
 }
 
 class _Header extends StatelessWidget {
-  const _Header();
+  const _Header({required this.onOpenSettings});
+
+  final VoidCallback onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -251,7 +268,8 @@ class _Header extends StatelessWidget {
             ),
             const Spacer(),
             IconButton(
-              onPressed: () {},
+              onPressed: onOpenSettings,
+              tooltip: '설정',
               icon: const Icon(Icons.settings_outlined),
               color: AppColors.textSecondary,
             ),

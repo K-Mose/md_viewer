@@ -130,6 +130,14 @@ class RecentFilesStore {
     return list;
   }
 
+  /// 목록을 모두 지우고, 지워진 항목을 돌려준다 (권한 해제 등 정리용).
+  Future<List<RecentFile>> clear() async {
+    final removed = await load();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_key);
+    return removed;
+  }
+
   Future<void> _save(List<RecentFile> list) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
