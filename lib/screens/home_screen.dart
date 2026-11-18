@@ -144,6 +144,7 @@ class _HomeScreenState extends State<HomeScreen> {
           // .txt는 설정에 따라 원문 그대로(기본) 또는 마크다운으로 보여준다.
           plainText: document.name.toLowerCase().endsWith('.txt') &&
               settings.txtViewMode == TxtViewMode.raw,
+          baseDirectory: documentDirectory(document.ref),
         ),
       ),
     );

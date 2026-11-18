@@ -102,7 +102,11 @@ class _EditorScreenState extends State<EditorScreen> {
   void _openPreview() {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => ViewerScreen(title: _title, content: _controller.text),
+        builder: (_) => ViewerScreen(
+          title: _title,
+          content: _controller.text,
+          baseDirectory: _saved == null ? null : documentDirectory(_saved!.ref),
+        ),
       ),
     );
   }

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 최근 파일을 다시 열 때 쓰는 참조의 종류.
@@ -31,6 +32,10 @@ class DocumentRef {
         value: json['value'] as String,
       );
 }
+
+/// 문서가 들어 있는 폴더. 일반 파일 경로일 때만 알 수 있고, 그 외에는 null.
+String? documentDirectory(DocumentRef ref) =>
+    ref.kind == DocumentRefKind.path ? p.dirname(ref.value) : null;
 
 class RecentFile {
   const RecentFile({

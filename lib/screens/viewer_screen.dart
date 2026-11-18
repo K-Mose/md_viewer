@@ -11,6 +11,7 @@ import '../services/reading_position_store.dart';
 import '../theme/app_theme.dart';
 import '../theme/text_scale_scope.dart';
 import '../theme/thin_scrollbar.dart';
+import '../widgets/markdown_image_node.dart';
 
 class ViewerScreen extends StatefulWidget {
   const ViewerScreen({
@@ -20,6 +21,7 @@ class ViewerScreen extends StatefulWidget {
     this.positionKey,
     this.initialPosition,
     this.plainText = false,
+    this.baseDirectory,
   });
 
   final String title;
@@ -33,6 +35,9 @@ class ViewerScreen extends StatefulWidget {
 
   /// true면 마크다운으로 해석하지 않고 원문 그대로 보여준다 (.txt).
   final bool plainText;
+
+  /// 문서가 들어 있는 폴더. 상대 경로 이미지를 찾는 기준이며, 모르면 null.
+  final String? baseDirectory;
 
   static const _padding = EdgeInsets.fromLTRB(20, 8, 20, 40);
 
@@ -87,6 +92,8 @@ class _ViewerScreenState extends State<ViewerScreen>
 
   /// 이 화면을 열 때의 설정. 설정 화면은 홈에서만 열 수 있어서 보는 동안은 바뀌지 않는다.
   final _settings = AppSettings.instance;
+  late final _generator =
+      buildMarkdownGenerator(baseDirectory: widget.baseDirectory);
   late final _config = ViewerScreen._buildConfig(
     _settings.lineSpacing.markdownHeight,
   );
@@ -242,6 +249,7 @@ class _ViewerScreenState extends State<ViewerScreen>
                         data: widget.content,
                         padding: ViewerScreen._padding,
                         config: _config,
+                        markdownGenerator: _generator,
                       ),
               ),
             ),
