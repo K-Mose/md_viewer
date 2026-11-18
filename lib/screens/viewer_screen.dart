@@ -7,11 +7,14 @@ import 'package:scroll_to_index/scroll_to_index.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../services/app_settings.dart';
+import '../services/document_service.dart';
+import '../services/recent_files.dart';
 import '../services/reading_position_store.dart';
 import '../theme/app_theme.dart';
 import '../theme/text_scale_scope.dart';
 import '../theme/thin_scrollbar.dart';
 import '../widgets/markdown_image_node.dart';
+import 'editor_screen.dart';
 
 class ViewerScreen extends StatefulWidget {
   const ViewerScreen({
@@ -22,6 +25,7 @@ class ViewerScreen extends StatefulWidget {
     this.initialPosition,
     this.plainText = false,
     this.baseDirectory,
+    this.document,
   });
 
   final String title;
@@ -38,6 +42,9 @@ class ViewerScreen extends StatefulWidget {
 
   /// 문서가 들어 있는 폴더. 상대 경로 이미지를 찾는 기준이며, 모르면 null.
   final String? baseDirectory;
+
+  /// 이 화면이 보여주는 파일. 있으면 상단에 편집 버튼이 나온다 (에디터 미리보기는 null).
+  final SavedDocument? document;
 
   static const _padding = EdgeInsets.fromLTRB(20, 8, 20, 40);
 
@@ -90,10 +97,15 @@ class _ViewerScreenState extends State<ViewerScreen>
   final _markdownKey = GlobalKey<MarkdownWidgetState>();
   final _positions = ReadingPositionStore();
 
+  /// 편집·저장하면 바뀌는 현재 내용과 문서.
+  late String _content = widget.content;
+  late SavedDocument? _document = widget.document;
+  late String? _baseDirectory = widget.baseDirectory;
+
   /// 이 화면을 열 때의 설정. 설정 화면은 홈에서만 열 수 있어서 보는 동안은 바뀌지 않는다.
   final _settings = AppSettings.instance;
-  late final _generator =
-      buildMarkdownGenerator(baseDirectory: widget.baseDirectory);
+  late MarkdownGenerator _generator =
+      buildMarkdownGenerator(baseDirectory: _baseDirectory);
   late final _config = ViewerScreen._buildConfig(
     _settings.lineSpacing.markdownHeight,
   );
@@ -159,6 +171,32 @@ class _ViewerScreenState extends State<ViewerScreen>
     }
   }
 
+  /// 편집 화면을 연다. 저장할 때마다 이 화면의 내용이 바로 바뀐다.
+  Future<void> _edit() async {
+    final document = _document;
+    if (document == null) return;
+    _savePosition();
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => EditorScreen(
+          initialText: _content,
+          document: document,
+          onSaved: _onEdited,
+        ),
+      ),
+    );
+  }
+
+  void _onEdited(String text, SavedDocument document) {
+    if (!mounted) return;
+    setState(() {
+      _content = text;
+      _document = document;
+      _baseDirectory = documentDirectory(document.ref);
+      _generator = buildMarkdownGenerator(baseDirectory: _baseDirectory);
+    });
+  }
+
   void _savePosition() {
     final key = widget.positionKey;
     // 복원 이동 중의 중간 위치를 저장하면 안 된다.
@@ -197,7 +235,7 @@ class _ViewerScreenState extends State<ViewerScreen>
     return ReadingPosition(
       index: index,
       offset: scrollOffset - start,
-      length: widget.content.length,
+      length: _content.length,
     );
   }
 
@@ -221,10 +259,20 @@ class _ViewerScreenState extends State<ViewerScreen>
       child: Scaffold(
         appBar: AppBar(
           title: Text(
-            widget.title,
+            _document?.name ?? widget.title,
             style: const TextStyle(fontSize: 16, fontWeight: .w600),
             overflow: .ellipsis,
           ),
+          actions: [
+            if (_document != null)
+              IconButton(
+                tooltip: '편집',
+                icon: const Icon(Icons.edit_outlined),
+                color: Theme.of(context).colorScheme.onSurface,
+                onPressed: _edit,
+              ),
+            const SizedBox(width: 4),
+          ],
         ),
         body: ThinScrollbars(
           // 설정의 글자 크기
@@ -240,13 +288,13 @@ class _ViewerScreenState extends State<ViewerScreen>
                 opacity: _restoring ? 0 : 1,
                 child: widget.plainText
                     ? _PlainTextView(
-                        content: widget.content,
+                        content: _content,
                         controller: _plainController,
                         lineHeight: _settings.lineSpacing.plainHeight,
                       )
                     : MarkdownWidget(
                         key: _markdownKey,
-                        data: widget.content,
+                        data: _content,
                         padding: ViewerScreen._padding,
                         config: _config,
                         markdownGenerator: _generator,

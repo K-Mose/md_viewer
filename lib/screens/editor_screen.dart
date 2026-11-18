@@ -33,10 +33,22 @@ String suggestFileName(String text) {
 /// - 입력이 멈추고 1초 뒤 앱 안에 자동 임시저장
 /// - 저장하지 않은 채 나가면 저장 / 임시저장 / 저장 안 함 선택
 class EditorScreen extends StatefulWidget {
-  const EditorScreen({super.key, this.initialText = ''});
+  const EditorScreen({
+    super.key,
+    this.initialText = '',
+    this.document,
+    this.onSaved,
+  });
 
-  /// 임시저장에서 이어 쓸 때의 내용
+  /// 임시저장에서 이어 쓸 때의 내용. [document]가 있으면 그 파일의 현재 내용.
   final String initialText;
+
+  /// 이미 있는 파일을 고칠 때의 문서. null이면 새 문서.
+  /// 기존 파일 편집은 "새 문서" 임시저장 칸을 쓰지 않는다.
+  final SavedDocument? document;
+
+  /// 파일에 저장할 때마다 호출된다 (뷰어가 화면을 갱신하는 데 쓴다).
+  final void Function(String text, SavedDocument document)? onSaved;
 
   @override
   State<EditorScreen> createState() => _EditorScreenState();
@@ -52,13 +64,16 @@ class _EditorScreenState extends State<EditorScreen> {
   final _documents = DocumentService.instance;
   late final _controller = TextEditingController(text: widget.initialText);
 
+  /// 새 문서만 앱 안 임시저장을 쓴다. 기존 파일은 저장하지 않으면 원본이 그대로 남는다.
+  bool get _usesDraft => widget.document == null;
+
   Timer? _autosaveTimer;
 
   /// 파일로 저장한 문서 (아직 저장 안 했으면 null)
-  SavedDocument? _saved;
+  late SavedDocument? _saved = widget.document;
 
   /// 마지막으로 파일에 저장한 내용. 이것과 다르면 "변경됨".
-  String _savedText = '';
+  late String _savedText = widget.document == null ? '' : widget.initialText;
   bool _dirty = false;
   bool _saving = false;
 
@@ -85,7 +100,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
     _autosaveTimer?.cancel();
     // 설정에서 자동 임시저장을 끄면 나갈 때 "임시저장"을 직접 고른 경우에만 저장한다.
-    if (AppSettings.instance.autoDraft) {
+    if (_usesDraft && AppSettings.instance.autoDraft) {
       _autosaveTimer = Timer(_autosaveDelay, _autosave);
     }
   }
@@ -124,7 +139,8 @@ class _EditorScreenState extends State<EditorScreen> {
 
       _saved = saved;
       _savedText = text;
-      await _draftStore.clear();
+      if (_usesDraft) await _draftStore.clear();
+      widget.onSaved?.call(text, saved);
       final update = await _recentStore.add(saved.toRecent());
       for (final evicted in update.evicted) {
         _documents.release(evicted.ref);
@@ -162,7 +178,7 @@ class _EditorScreenState extends State<EditorScreen> {
   Future<void> _confirmExit() async {
     final choice = await showDialog<_ExitChoice>(
       context: context,
-      builder: (_) => const _ExitDialog(),
+      builder: (_) => _ExitDialog(allowDraft: _usesDraft),
     );
     if (choice == null || !mounted) return;
 
@@ -174,7 +190,7 @@ class _EditorScreenState extends State<EditorScreen> {
         await _draftStore.save(_controller.text);
       case _ExitChoice.discard:
         _autosaveTimer?.cancel();
-        await _draftStore.clear();
+        if (_usesDraft) await _draftStore.clear();
     }
     if (mounted) Navigator.of(context).pop();
   }
@@ -194,7 +210,9 @@ class _EditorScreenState extends State<EditorScreen> {
         if (didPop) {
           // 변경 없이 나갈 때: 빈 문서였다면 임시저장도 남기지 않는다.
           _autosaveTimer?.cancel();
-          if (_controller.text.trim().isEmpty) _draftStore.clear();
+          if (_usesDraft && _controller.text.trim().isEmpty) {
+            _draftStore.clear();
+          }
           return;
         }
         _confirmExit();
@@ -300,14 +318,19 @@ class _EditorField extends StatelessWidget {
 }
 
 class _ExitDialog extends StatelessWidget {
-  const _ExitDialog();
+  const _ExitDialog({required this.allowDraft});
+
+  /// 새 문서만 임시저장을 고를 수 있다.
+  final bool allowDraft;
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('저장하지 않은 내용이 있어요'),
-      content: const Text(
-        '임시저장하면 앱 안에 보관되고, 다음에 "새 문서"에서 이어서 쓸 수 있어요.',
+      content: Text(
+        allowDraft
+            ? '임시저장하면 앱 안에 보관되고, 다음에 "새 문서"에서 이어서 쓸 수 있어요.'
+            : '저장하지 않으면 파일은 수정 전 내용 그대로 남아요.',
         style: TextStyle(color: AppColors.textSecondary, height: 1.5),
       ),
       actions: [
@@ -315,10 +338,11 @@ class _ExitDialog extends StatelessWidget {
           onPressed: () => Navigator.of(context).pop(_ExitChoice.discard),
           child: const Text('저장 안 함'),
         ),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(_ExitChoice.draft),
-          child: const Text('임시저장'),
-        ),
+        if (allowDraft)
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(_ExitChoice.draft),
+            child: const Text('임시저장'),
+          ),
         // 앱 테마의 FilledButton은 가로로 꽉 차서(Size.fromHeight) 대화상자에는 TextButton을 쓴다.
         TextButton(
           onPressed: () => Navigator.of(context).pop(_ExitChoice.save),

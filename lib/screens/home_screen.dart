@@ -145,6 +145,11 @@ class _HomeScreenState extends State<HomeScreen> {
           plainText: document.name.toLowerCase().endsWith('.txt') &&
               settings.txtViewMode == TxtViewMode.raw,
           baseDirectory: documentDirectory(document.ref),
+          document: SavedDocument(
+            name: document.name,
+            ref: document.ref,
+            location: document.location,
+          ),
         ),
       ),
     );
