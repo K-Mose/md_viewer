@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../app_info.dart';
@@ -6,6 +8,7 @@ import '../services/document_service.dart';
 import '../services/draft_store.dart';
 import '../services/reading_position_store.dart';
 import '../services/recent_files.dart';
+import '../services/storage_access.dart';
 import '../services/text_decoder.dart';
 import '../theme/app_theme.dart';
 import '../theme/text_scale_scope.dart';
@@ -19,7 +22,8 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class _SettingsScreenState extends State<SettingsScreen>
+    with WidgetsBindingObserver {
   final _settings = AppSettings.instance;
   final _recentStore = RecentFilesStore();
   final _positionStore = ReadingPositionStore();
@@ -29,11 +33,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _recentCount = 0;
   int _positionCount = 0;
   Draft? _draft;
+  bool _allFilesAccess = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _refresh();
+    _refreshAllFilesAccess();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// 시스템 설정에서 권한을 바꾸고 돌아오면 상태를 다시 읽는다.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshAllFilesAccess();
+  }
+
+  Future<void> _refreshAllFilesAccess() async {
+    final allowed = await StorageAccessService.instance.hasAllFilesAccess();
+    if (!mounted || allowed == _allFilesAccess) return;
+    setState(() => _allFilesAccess = allowed);
   }
 
   /// "지우기" 항목에 보여줄 개수와 임시저장 상태를 다시 읽는다.
@@ -169,6 +194,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     subtitle: '$_positionCount개 문서',
                     onTap: _positionCount > 0 ? _clearPositions : null,
                   ),
+                  // Android 전용: 허용하면 문서 옆 이미지를 폴더 선택 없이 바로 불러온다.
+                  if (Platform.isAndroid)
+                    _ActionTile(
+                      title: '모든 파일 접근 (문서 옆 이미지)',
+                      subtitle: _allFilesAccess
+                          ? '허용됨 · 문서와 같은 폴더의 이미지를 바로 불러와요'
+                          : '허용하면 문서와 같은 폴더의 이미지를 바로 불러와요. '
+                              '눌러서 설정에서 허용해 주세요 (Android 11 이상)',
+                      onTap: StorageAccessService.instance.openAllFilesSettings,
+                    ),
                   _ChoiceTile<EncodingPreference>(
                     title: '기본 인코딩',
                     description: '자동은 UTF-8, 안 되면 CP949 순서로 읽어요. '

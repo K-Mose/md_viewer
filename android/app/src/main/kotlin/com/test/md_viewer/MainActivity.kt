@@ -3,10 +3,13 @@ package com.test.md_viewer
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -81,6 +84,21 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                 }
+                "canRequestAllFilesAccess" ->
+                    result.success(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                "hasAllFilesAccess" -> result.success(hasAllFilesAccess())
+                "openAllFilesSettings" -> {
+                    openAllFilesSettings()
+                    result.success(null)
+                }
+                "resolveDocumentPath" -> {
+                    val uri = call.argument<String>("value")?.let(Uri::parse)
+                    if (uri == null) {
+                        result.error("invalid_argument", "uri가 없습니다", null)
+                    } else {
+                        runIo(result) { resolveDocumentPath(uri) }
+                    }
+                }
                 "releaseDocument" -> {
                     call.argument<String>("value")?.let { releaseDocument(Uri.parse(it)) }
                     result.success(null)
@@ -129,6 +147,57 @@ class MainActivity : FlutterActivity() {
             pendingPick = null
             result.error("unavailable", e.message, null)
         }
+    }
+
+    // ───────────────────────── 모든 파일 접근 ─────────────────────────
+
+    /** "모든 파일 접근"이 허용돼 있는지 (Android 11 이상에만 있는 권한). */
+    private fun hasAllFilesAccess(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
+
+    /** 이 앱의 "모든 파일 접근" 설정 화면을 연다. 안 열리는 기기는 전체 목록 화면으로 대신한다. */
+    private fun openAllFilesSettings() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val appIntent = Intent(
+            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+            Uri.parse("package:$packageName"),
+        )
+        try {
+            startActivity(appIntent)
+        } catch (_: Exception) {
+            try {
+                startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /**
+     * 문서 주소에서 실제 파일 경로를 계산한다. 계산할 수 없거나 파일이 없으면 null.
+     * - raw:/storage/... (다운로드 제공자)는 그대로
+     * - 내장 저장소 "primary:Download/a.md" → /storage/emulated/0/Download/a.md
+     * - SD 카드 등 "1234-ABCD:docs/a.md" → /storage/1234-ABCD/docs/a.md
+     * 그 밖의 제공자(드라이브, 다운로드 앱의 msf:…)는 경로를 알 수 없다.
+     */
+    private fun resolveDocumentPath(uri: Uri): String? {
+        if (uri.scheme == "file") return uri.path?.takeIf { File(it).exists() }
+        if (!DocumentsContract.isDocumentUri(this, uri)) return null
+        val id = DocumentsContract.getDocumentId(uri)
+        if (id.startsWith("raw:")) {
+            return id.removePrefix("raw:").takeIf { File(it).exists() }
+        }
+        if (uri.authority != "com.android.externalstorage.documents") return null
+        val colon = id.indexOf(':')
+        if (colon < 0) return null
+        val volume = id.substring(0, colon)
+        val relative = id.substring(colon + 1)
+        val root = if (volume == "primary") {
+            Environment.getExternalStorageDirectory().path
+        } else {
+            "/storage/$volume"
+        }
+        val file = File(root, relative)
+        return if (file.exists()) file.path else null
     }
 
     // ───────────────────────── 새 파일로 저장 ─────────────────────────

@@ -7,6 +7,8 @@ import 'package:md_viewer/services/document_service.dart';
 import 'package:md_viewer/services/recent_files.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'test_utils.dart';
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
@@ -47,6 +49,7 @@ void main() {
     Navigator.of(tester.element(find.byType(TextField))).pop();
     await tester.pumpAndSettle();
     expect(find.text('수정됨'), findsOneWidget);
+    await disposeAndFlush(tester);
   });
 
   testWidgets('document가 없으면(에디터 미리보기) 편집 버튼이 없다', (tester) async {
@@ -55,5 +58,6 @@ void main() {
     ));
     await tester.pump();
     expect(find.byTooltip('편집'), findsNothing);
+    await disposeAndFlush(tester);
   });
 }

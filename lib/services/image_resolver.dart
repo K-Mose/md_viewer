@@ -118,3 +118,26 @@ ImageSource? _decodeDataUri(String value) {
   }
   return null;
 }
+
+/// 마크다운 본문에 상대 경로 이미지(문서 옆 파일)가 있는지.
+/// http(s), data:, file:, 절대 경로 이미지는 세지 않는다.
+bool hasRelativeImages(String markdown) {
+  for (final match in _imageDestination.allMatches(markdown)) {
+    final value = (match.group(1) ?? match.group(2) ?? '').trim();
+    if (value.isEmpty) continue;
+    final lower = value.toLowerCase();
+    if (lower.startsWith('http://') ||
+        lower.startsWith('https://') ||
+        lower.startsWith('data:') ||
+        lower.startsWith('file:') ||
+        lower.startsWith('/') ||
+        RegExp(r'^[a-zA-Z]:[\\/]').hasMatch(value)) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+// ![alt](dest) 또는 ![alt](<dest with spaces>) — 제목("title")은 목적지 뒤에 오므로 무시한다.
+final _imageDestination = RegExp(r'!\[[^\]]*\]\((?:<([^>]*)>|([^\s)]*))');

@@ -1,11 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../services/app_settings.dart';
 import '../services/document_service.dart';
 import '../services/draft_store.dart';
+import '../services/image_resolver.dart';
 import '../services/opened_file_service.dart';
 import '../services/reading_position_store.dart';
 import '../services/recent_files.dart';
+import '../services/storage_access.dart';
 import '../services/text_decoder.dart';
 import '../theme/app_theme.dart';
 import 'editor_screen.dart';
@@ -21,21 +25,27 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _store = RecentFilesStore();
   final _positions = ReadingPositionStore();
   final _documents = DocumentService.instance;
   List<RecentFile> _recentFiles = [];
 
+  /// 시스템 설정(모든 파일 접근)에 갔다가 앱으로 돌아오기를 기다리는 중이면 값이 있다.
+  Completer<void>? _resumeWaiter;
+  bool _sawPause = false;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initOpenedFileService();
     _loadRecents().then((_) => _loadInitialFile());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     OpenedFileService.instance
       ..onFileOpened = null
       ..dispose();
@@ -72,7 +82,56 @@ class _HomeScreenState extends State<HomeScreen> {
     final service = OpenedFileService.instance;
     service.onFileOpened = _showDocument;
     final initial = await service.init();
-    if (initial != null) _showDocument(initial);
+    if (initial != null) {
+      _showDocument(initial);
+    } else {
+      // 외부에서 문서를 열며 시작한 게 아닐 때만 처음 안내를 보여준다.
+      await _askAllFilesAccessOnFirstRun();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) _sawPause = true;
+    // 설정 화면에 다녀온 뒤에만 기다림을 끝낸다.
+    if (state == AppLifecycleState.resumed && _sawPause) {
+      final waiter = _resumeWaiter;
+      if (waiter != null && !waiter.isCompleted) waiter.complete();
+    }
+  }
+
+  /// 시스템 설정의 "모든 파일 접근" 화면을 열고, 사용자가 앱으로 돌아올 때까지 기다린다.
+  Future<void> _openAllFilesSettingsAndWait() async {
+    final waiter = Completer<void>();
+    _resumeWaiter = waiter;
+    _sawPause = false;
+    await StorageAccessService.instance.openAllFilesSettings();
+    await waiter.future.timeout(const Duration(minutes: 3), onTimeout: () {});
+    _resumeWaiter = null;
+  }
+
+  /// 앱을 처음 켰을 때 한 번만 "모든 파일 접근" 허용을 안내한다 (Android 11 이상).
+  /// 거절해도 설정 화면과 이미지가 있는 문서를 열 때 다시 안내한다.
+  Future<void> _askAllFilesAccessOnFirstRun() async {
+    final access = StorageAccessService.instance;
+    final promptStore = AllFilesAccessPromptStore();
+    if (!await access.canRequestAllFilesAccess() ||
+        await access.hasAllFilesAccess() ||
+        await promptStore.wasShown()) {
+      return;
+    }
+    if (!mounted) return;
+    await promptStore.markShown();
+    if (!mounted) return;
+    final open = await showDialog<bool>(
+      context: context,
+      builder: (_) => const _AllFilesAccessDialog(
+        message: '마크다운 문서와 같은 폴더에 있는 이미지를 바로 보여주려면 '
+            '"모든 파일 접근"이 필요해요. 설정 화면에서 이 앱을 허용해 주세요.\n'
+            '나중에 설정 화면에서도 바꿀 수 있어요.',
+      ),
+    );
+    if (open == true) await StorageAccessService.instance.openAllFilesSettings();
   }
 
   Future<void> _pickAndOpenFile() async {
@@ -156,6 +215,35 @@ class _HomeScreenState extends State<HomeScreen> {
     if (document.text.encoding == TextEncoding.utf8Lossy) {
       _showMessage('인코딩을 알 수 없어 일부 글자가 깨져 보일 수 있어요.');
     }
+    // 문서 옆 이미지를 읽을 폴더. 일반 경로면 바로 알 수 있고, Android는 "모든 파일 접근"이
+    // 허용돼 있으면 문서 주소에서 계산한다.
+    final access = StorageAccessService.instance;
+    var baseDirectory =
+        documentDirectory(document.ref) ?? await access.documentDirectory(document.ref);
+    final plainText = document.name.toLowerCase().endsWith('.txt') &&
+        settings.txtViewMode == TxtViewMode.raw;
+    // 이미지가 있는데 권한이 없어 읽지 못하는 문서는 열 때마다 허용을 안내한다.
+    if (baseDirectory == null &&
+        !plainText &&
+        document.ref.kind != DocumentRefKind.path &&
+        hasRelativeImages(document.text.text) &&
+        await access.canRequestAllFilesAccess() &&
+        !await access.hasAllFilesAccess()) {
+      if (!mounted) return;
+      final open = await showDialog<bool>(
+        context: context,
+        builder: (_) => const _AllFilesAccessDialog(
+          message: '이 문서에는 같은 폴더의 이미지가 있어요. '
+              '"모든 파일 접근"을 허용하면 이미지를 바로 볼 수 있어요.\n'
+              '허용하고 돌아오면 이 문서가 이어서 열려요.',
+        ),
+      );
+      if (open == true) {
+        await _openAllFilesSettingsAndWait();
+        baseDirectory = await access.documentDirectory(document.ref);
+      }
+    }
+    if (!mounted) return;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ViewerScreen(
@@ -164,9 +252,8 @@ class _HomeScreenState extends State<HomeScreen> {
           positionKey: settings.rememberPosition ? recent.key : null,
           initialPosition: position,
           // .txt는 설정에 따라 원문 그대로(기본) 또는 마크다운으로 보여준다.
-          plainText: document.name.toLowerCase().endsWith('.txt') &&
-              settings.txtViewMode == TxtViewMode.raw,
-          baseDirectory: documentDirectory(document.ref),
+          plainText: plainText,
+          baseDirectory: baseDirectory,
           document: SavedDocument(
             name: document.name,
             ref: document.ref,
@@ -375,6 +462,34 @@ class _DraftDialog extends StatelessWidget {
         TextButton(
           onPressed: () => Navigator.of(context).pop(_DraftChoice.resume),
           child: const Text('이어서 쓰기', style: TextStyle(fontWeight: .w700)),
+        ),
+      ],
+    );
+  }
+}
+
+class _AllFilesAccessDialog extends StatelessWidget {
+  const _AllFilesAccessDialog({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('모든 파일 접근을 허용할까요?'),
+      content: Text(
+        message,
+        style: const TextStyle(color: AppColors.textSecondary, height: 1.5),
+      ),
+      // 앱 테마의 FilledButton은 가로로 꽉 차서(Size.fromHeight) 대화상자에는 TextButton을 쓴다.
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('나중에'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('설정 열기', style: TextStyle(fontWeight: .w700)),
         ),
       ],
     );

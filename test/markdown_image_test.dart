@@ -6,6 +6,8 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:md_viewer/screens/viewer_screen.dart';
 
+import 'test_utils.dart';
+
 // 1x1 투명 PNG
 final _png = base64Decode(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==');
@@ -27,6 +29,7 @@ void main() {
 
     expect(find.byType(Image), findsWidgets);
     expect(find.byIcon(Icons.broken_image), findsOneWidget);
+    await disposeAndFlush(tester);
   });
 
   testWidgets('SVG 이미지도 표시한다', (tester) async {
@@ -47,5 +50,6 @@ void main() {
 
     expect(find.byType(SvgPicture), findsOneWidget);
     expect(find.byIcon(Icons.broken_image), findsNothing);
+    await disposeAndFlush(tester);
   });
 }

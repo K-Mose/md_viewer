@@ -38,6 +38,7 @@ class EditorScreen extends StatefulWidget {
     this.initialText = '',
     this.document,
     this.onSaved,
+    this.baseDirectory,
   });
 
   /// 임시저장에서 이어 쓸 때의 내용. [document]가 있으면 그 파일의 현재 내용.
@@ -49,6 +50,9 @@ class EditorScreen extends StatefulWidget {
 
   /// 파일에 저장할 때마다 호출된다 (뷰어가 화면을 갱신하는 데 쓴다).
   final void Function(String text, SavedDocument document)? onSaved;
+
+  /// 문서 옆 이미지를 읽을 폴더. 미리보기에 전달한다 (모르면 null).
+  final String? baseDirectory;
 
   @override
   State<EditorScreen> createState() => _EditorScreenState();
@@ -120,7 +124,9 @@ class _EditorScreenState extends State<EditorScreen> {
         builder: (_) => ViewerScreen(
           title: _title,
           content: _controller.text,
-          baseDirectory: _saved == null ? null : documentDirectory(_saved!.ref),
+          baseDirectory:
+              (_saved == null ? null : documentDirectory(_saved!.ref)) ??
+                  widget.baseDirectory,
         ),
       ),
     );

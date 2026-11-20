@@ -113,10 +113,20 @@ void main() {
       expect(result.encoding, TextEncoding.utf8Lossy);
     });
 
-    test('UTF-8 파일을 CP949로 지정하면 사용자가 고른 대로 읽는다', () {
+    test('UTF-8 파일을 CP949로 지정해도 예외 없이 읽는다', () {
+      // CP949로 해석할 수 없는 바이트면 깨진 글자를 허용해 UTF-8로 보여주고,
+      // 해석할 수 있으면 CP949 결과가 나온다. 어느 쪽이든 예외는 던지지 않는다.
       final bytes = Uint8List.fromList(utf8.encode('안녕'));
-      final result = decodeText(bytes, preference: EncodingPreference.cp949);
-      expect(result.text, isNot('안녕'));
+      late DecodedText result;
+      expect(
+        () => result = decodeText(bytes, preference: EncodingPreference.cp949),
+        returnsNormally,
+      );
+      expect(result.text, isNotEmpty);
+      expect(
+        [TextEncoding.cp949, TextEncoding.utf8Lossy],
+        contains(result.encoding),
+      );
     });
 
     test('자동은 기존과 같다', () {

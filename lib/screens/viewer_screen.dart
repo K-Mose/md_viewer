@@ -181,6 +181,7 @@ class _ViewerScreenState extends State<ViewerScreen>
         builder: (_) => EditorScreen(
           initialText: _content,
           document: document,
+          baseDirectory: _baseDirectory,
           onSaved: _onEdited,
         ),
       ),
@@ -192,7 +193,8 @@ class _ViewerScreenState extends State<ViewerScreen>
     setState(() {
       _content = text;
       _document = document;
-      _baseDirectory = documentDirectory(document.ref);
+      // 저장하면 문서 주소가 그대로여도 폴더를 다시 알 수 없는 경우가 있어 기존 값을 유지한다.
+      _baseDirectory = documentDirectory(document.ref) ?? _baseDirectory;
       _generator = buildMarkdownGenerator(baseDirectory: _baseDirectory);
     });
   }

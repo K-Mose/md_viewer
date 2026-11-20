@@ -1,5 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- 문서 옆 이미지(상대 경로)를 바로 읽기 위한 "모든 파일 접근". 사용자가 설정에서 직접 허용해야 하며 Android 11 이상. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
     <application
         android:label="md_viewer"
         android:name="${applicationName}"
