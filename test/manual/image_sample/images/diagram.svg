@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="140" viewBox="0 0 360 140">
+  <rect width="360" height="140" rx="12" fill="#1e293b"/>
+  <rect x="20" y="40" width="90" height="60" rx="8" fill="#38bdf8"/>
+  <rect x="135" y="40" width="90" height="60" rx="8" fill="#a78bfa"/>
+  <rect x="250" y="40" width="90" height="60" rx="8" fill="#34d399"/>
+  <path d="M110 70H135M225 70H250" stroke="#fff" stroke-width="3"/>
+  <text x="65" y="76" font-size="14" text-anchor="middle" fill="#0f172a">App</text>
+  <text x="180" y="76" font-size="14" text-anchor="middle" fill="#0f172a">Server</text>
+  <text x="295" y="76" font-size="14" text-anchor="middle" fill="#0f172a">FCM</text>
+</svg>
