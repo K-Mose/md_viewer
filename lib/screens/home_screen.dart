@@ -13,7 +13,9 @@ import 'settings_screen.dart';
 import 'viewer_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({this.initialFile, super.key});
+
+  final String? initialFile;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -28,8 +30,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _loadRecents();
     _initOpenedFileService();
+    _loadRecents().then((_) => _loadInitialFile());
   }
 
   @override
@@ -38,6 +40,26 @@ class _HomeScreenState extends State<HomeScreen> {
       ..onFileOpened = null
       ..dispose();
     super.dispose();
+  }
+
+  Future<void> _loadInitialFile() async {
+    final path = widget.initialFile;
+    if (path == null || !mounted) return;
+    final LoadedDocument document;
+    try {
+      document = await _documents.open(
+        DocumentRef(kind: DocumentRefKind.path, value: path),
+      );
+    } on DocumentException catch (e) {
+      if (!mounted) return;
+      _showMessage(switch (e.kind) {
+        DocumentErrorKind.notFound => '파일을 찾을 수 없어요.',
+        DocumentErrorKind.permissionDenied => '이 파일을 열 권한이 없어요.',
+        DocumentErrorKind.unknown => '파일을 여는 중 문제가 생겼어요.',
+      });
+      return;
+    }
+    await _showDocument(document);
   }
 
   Future<void> _loadRecents() async {
